@@ -1,0 +1,12 @@
+flask==3.0.3
+flask-cors==4.0.1
+transformers==4.42.4
+Pillow==10.4.0
+opencv-python-headless==4.10.0.84
+numpy==1.26.4
+pyspellchecker==0.8.1
+
+# torch is intentionally NOT pinned here.
+# Install it separately with the CPU-only build - see README "Reducing RAM usage".
+# A plain `pip install torch` on some systems pulls the CUDA build, which is
+# much larger and uses noticeably more RAM even when you have no GPU.
