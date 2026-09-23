@@ -1,40 +1,45 @@
 """
-Handwriting recognition using TrOCR, an open-source transformer OCR model
-from Microsoft/Hugging Face, fine-tuned on the IAM Handwriting Database.
+Handwriting recognition with TrOCR (Hugging Face), one line at a time.
 
-Model size is configurable via the TROCR_MODEL env var:
-  microsoft/trocr-small-handwritten  -> ~250MB, low RAM, default here
-  microsoft/trocr-base-handwritten   -> ~1.3GB, slightly better accuracy
-
-Start with "small" if RAM is tight. Switch to "base" only if accuracy
-on your actual samples isn't good enough - see README.
+Env vars:
+  TROCR_MODEL  default microsoft/trocr-base-handwritten
+  NUM_BEAMS    default 5 (use 2 for faster CPU runs)
+  SPELLCHECK   default 1 (set 0 to return raw text as cleaned_text)
 """
 
 import os
 import gc
+import time
+import difflib
 import torch
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 from spellchecker import SpellChecker
 
-_MODEL_NAME = os.environ.get("TROCR_MODEL", "microsoft/trocr-small-handwritten")
+_MODEL_NAME = os.environ.get("TROCR_MODEL", "microsoft/trocr-base-handwritten")
+_NUM_BEAMS = int(os.environ.get("NUM_BEAMS", "5"))
+_SPELLCHECK = os.environ.get("SPELLCHECK", "1") == "1"
 
-# Cap CPU thread usage - unrestricted PyTorch will spin up a thread pool
-# sized to all your cores, which increases peak memory use for no real
-# speed benefit on a small demo workload.
 torch.set_num_threads(max(2, os.cpu_count() // 2 if os.cpu_count() else 2))
 
 _device = "cuda" if torch.cuda.is_available() else "cpu"
 _processor = None
 _model = None
-_spell = SpellChecker()
+_spell = SpellChecker(distance=1)   # only fix single-edit misreads
+
+# Subject vocabulary: near-miss words snap to these. Keep it specific to the
+# notes you're digitising; add or remove words freely.
+_DOMAIN = [
+    "disaster", "disasters", "management", "natural", "earthquake", "cyclone",
+    "flood", "landslide", "forest", "precautions", "prevented", "avoided",
+    "occurred", "constructions", "buildings", "houses", "effects", "damage",
+    "assessment", "internal", "types", "made", "areas", "street", "city",
+]
 
 
 def load_model():
-    """Loads the model once at service startup. First call downloads
-    weights from Hugging Face if not already cached locally."""
     global _processor, _model
     if _model is None:
-        print(f"Loading {_MODEL_NAME} on {_device} ... (first run downloads the model)")
+        print(f"Loading {_MODEL_NAME} on {_device} ...")
         _processor = TrOCRProcessor.from_pretrained(_MODEL_NAME)
         _model = VisionEncoderDecoderModel.from_pretrained(_MODEL_NAME).to(_device)
         _model.eval()
@@ -43,60 +48,83 @@ def load_model():
 
 
 def _clean_text(raw_text: str) -> str:
-    """Best-effort spell correction on the raw OCR output. Only touches
-    words the checker doesn't recognize, and only when it's confident,
-    so it won't mangle names or unusual words."""
-    words = raw_text.split()
-    corrected = []
-    for w in words:
-        stripped = w.strip(".,!?;:\"'()")
-        if not stripped or not stripped.isalpha():
-            corrected.append(w)
+    """Conservative cleanup:
+    1) snap near-misses to the subject vocabulary (cutoff 0.8),
+    2) otherwise fix unknown words of 4+ letters only when the spell-checker
+       finds exactly one single-edit candidate.
+    Everything else is left untouched."""
+    if not _SPELLCHECK:
+        return raw_text
+    out = []
+    for w in raw_text.split():
+        core = w.strip(".,!?;:\"'()")
+        if len(core) < 4 or not core.isalpha():
+            out.append(w)
             continue
-        if stripped.lower() in _spell:
-            corrected.append(w)
+        low = core.lower()
+
+        if low in _DOMAIN:
+            out.append(w)
+            continue
+        m = difflib.get_close_matches(low, _DOMAIN, n=1, cutoff=0.8)
+        if m:
+            fix = m[0].capitalize() if core[0].isupper() else m[0]
+            out.append(w.replace(core, fix))
+            continue
+
+        if low in _spell:
+            out.append(w)
+            continue
+        cands = _spell.candidates(low)
+        if cands and len(cands) == 1:            # unambiguous only
+            fix = next(iter(cands))
+            if core[0].isupper():
+                fix = fix.capitalize()
+            out.append(w.replace(core, fix))
         else:
-            suggestion = _spell.correction(stripped.lower())
-            if suggestion and suggestion != stripped.lower():
-                # Preserve original capitalization pattern
-                if stripped[0].isupper():
-                    suggestion = suggestion.capitalize()
-                corrected.append(w.replace(stripped, suggestion))
-            else:
-                corrected.append(w)
-    return " ".join(corrected)
+            out.append(w)
+    return " ".join(out)
+
+
+def _is_degenerate(text: str) -> bool:
+    tokens = text.split()
+    if len(tokens) < 8:
+        return False
+    most_common = max(set(tokens), key=tokens.count)
+    return tokens.count(most_common) / len(tokens) > 0.5
 
 
 def _recognize_line(image) -> str:
-    """Runs TrOCR on a single line image and returns the raw decoded text.
-    num_beams=2 (instead of 4) roughly halves decoding memory/time with
-    only a small accuracy tradeoff - worth it on a laptop demo."""
     model, processor = load_model()
     pixel_values = processor(images=image, return_tensors="pt").pixel_values.to(_device)
     with torch.no_grad():
-        generated_ids = model.generate(
+        ids = model.generate(
             pixel_values,
-            max_length=128,
-            num_beams=2,
+            max_length=96,
+            num_beams=_NUM_BEAMS,
+            early_stopping=True,
+            no_repeat_ngram_size=3,
         )
-    text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
-    del pixel_values, generated_ids
+    text = processor.batch_decode(ids, skip_special_tokens=True)[0]
+    del pixel_values, ids
     return text
 
 
 def recognize_text(line_images: list) -> dict:
-    """
-    line_images: list of PIL.Image, one per text line (see preprocess.segment_lines)
-    Returns: { "raw_text": str, "cleaned_text": str }
-    Lines are joined with newlines so paragraph structure is preserved.
-    """
-    raw_lines = [_recognize_line(img) for img in line_images]
-    raw_text = "\n".join(raw_lines)
-    cleaned_text = "\n".join(_clean_text(line) for line in raw_lines)
+    """line_images: list of PIL images, one per line (see preprocess.segment_lines).
+    Returns {"raw_text": str, "cleaned_text": str}."""
+    print(f"Recognizing {len(line_images)} lines (beams={_NUM_BEAMS}) ...")
+    raw_lines = []
+    for i, img in enumerate(line_images, 1):
+        t = time.time()
+        raw_lines.append(_recognize_line(img))
+        print(f"  line {i}/{len(line_images)} done in {time.time() - t:.1f}s")
 
-    gc.collect()  # release intermediate tensors between requests
+    raw_lines = ["" if _is_degenerate(l) else l for l in raw_lines]
+    raw_lines = [l for l in raw_lines if l.strip()]
 
+    gc.collect()
     return {
-        "raw_text": raw_text,
-        "cleaned_text": cleaned_text,
+        "raw_text": "\n".join(raw_lines),
+        "cleaned_text": "\n".join(_clean_text(l) for l in raw_lines),
     }

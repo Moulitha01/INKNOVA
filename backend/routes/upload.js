@@ -34,7 +34,7 @@ router.post("/", upload.single("image"), async (req, res) => {
       headers: form.getHeaders(),
       maxContentLength: Infinity,
       maxBodyLength: Infinity,
-      timeout: 120000, // model inference can take a while on CPU
+      timeout: 300000, // model inference can take a while on CPU
     });
 
     return res.json(response.data);
