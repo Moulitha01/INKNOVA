@@ -1,0 +1,36 @@
+<!doctype html><meta charset="utf-8"><title>Label lines</title>
+<style>
+body{font-family:-apple-system,Segoe UI,sans-serif;max-width:900px;margin:0 auto;padding:0 12px 40px}
+.bar{position:sticky;top:0;background:#fff;padding:10px 0;border-bottom:1px solid #ddd;z-index:2}
+.row{border:1px solid #ddd;border-radius:8px;padding:10px;margin:10px 0}
+.row img{max-width:100%;max-height:90px;display:block;background:#f5f5f5}
+.row input{width:100%;font-size:16px;padding:6px;margin-top:6px;box-sizing:border-box}
+button{padding:8px 14px;font-size:14px;cursor:pointer}
+small{color:#666}
+</style>
+<div class="bar"><b id="n"></b>
+<button onclick="save()">Download labels.csv</button><br>
+<small>Make each box match the image exactly. Clear a box to skip a bad crop.
+Save the downloaded file as dataset/labels.csv.</small></div>
+<div id="rows"></div>
+<script>
+const DATA = [{"file": "WhatsApp_Image_2026-09-23_at_13.56.44_01.png", "text": ""}, {"file": "WhatsApp_Image_2026-09-23_at_13.56.44_02.png", "text": ""}, {"file": "WhatsApp_Image_2026-09-23_at_13.56.44_03.png", "text": ""}, {"file": "WhatsApp_Image_2026-09-23_at_13.56.44_04.png", "text": ""}, {"file": "WhatsApp_Image_2026-09-23_at_13.56.44_05.png", "text": ""}, {"file": "WhatsApp_Image_2026-09-23_at_13.56.44_06.png", "text": ""}, {"file": "WhatsApp_Image_2026-09-23_at_13.56.44_07.png", "text": ""}, {"file": "WhatsApp_Image_2026-09-23_at_13.56.44_08.png", "text": ""}, {"file": "WhatsApp_Image_2026-09-23_at_13.56.44_09.png", "text": ""}, {"file": "WhatsApp_Image_2026-09-23_at_13.56.44_10.png", "text": ""}, {"file": "WhatsApp_Image_2026-09-23_at_13.56.44_11.png", "text": ""}, {"file": "WhatsApp_Image_2026-09-23_at_13.56.44_12.png", "text": ""}, {"file": "WhatsApp_Image_2026-09-23_at_13.56.44_13.png", "text": ""}, {"file": "WhatsApp_Image_2026-09-23_at_13.56.44_14.png", "text": ""}, {"file": "WhatsApp_Image_2026-09-23_at_13.56.44_15.png", "text": ""}, {"file": "WhatsApp_Image_2026-09-23_at_13.56.44_16.png", "text": ""}, {"file": "WhatsApp_Image_2026-09-23_at_13.56.44_17.png", "text": ""}, {"file": "WhatsApp_Image_2026-09-23_at_13.56.44_18.png", "text": ""}, {"file": "WhatsApp_Image_2026-09-23_at_13.56.44_19.png", "text": ""}, {"file": "WhatsApp_Image_2026-09-23_at_13.56.44_20.png", "text": ""}, {"file": "WhatsApp_Image_2026-09-23_at_13.56.44_21.png", "text": ""}, {"file": "WhatsApp_Image_2026-09-23_at_13.56.44_22.png", "text": ""}];
+const box = document.getElementById("rows");
+DATA.forEach((d, i) => {
+  const r = document.createElement("div"); r.className = "row";
+  r.innerHTML = '<img src="images/' + d.file + '"><input id="t' + i + '">';
+  box.appendChild(r);
+  document.getElementById("t" + i).value = d.text;
+});
+document.getElementById("n").textContent = DATA.length + " lines  ";
+function save() {
+  let csv = "file_name,text\n";
+  DATA.forEach((d, i) => {
+    const t = document.getElementById("t" + i).value.replace(/\s+/g, " ").trim();
+    if (t) csv += d.file + ',"' + t.replace(/"/g, '""') + '"\n';
+  });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["\ufeff" + csv], {type: "text/csv"}));
+  a.download = "labels.csv"; a.click();
+}
+</script>
