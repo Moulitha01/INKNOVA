@@ -7,7 +7,7 @@ export const recognizeImage = (file) => {
   form.append("image", file);
   return axios.post(`${API_BASE}/upload`, form, {
     headers: { "Content-Type": "multipart/form-data" },
-    timeout: 120000,
+    timeout: 300000, // CPU recognition can take a few minutes
   });
 };
 

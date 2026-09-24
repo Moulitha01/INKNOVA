@@ -11,9 +11,14 @@ export default function App() {
       <header>
         <h1>Handwritten Notes Digitizer</h1>
         <p className="subtitle">
-          Convert handwritten notes into editable, searchable digital text -
-          built entirely with open source software.
+          Turn a photo of handwriting into editable, searchable text, built
+          entirely with open source software.
         </p>
+        <ol className="steps">
+          <li><span>1</span> Upload</li>
+          <li><span>2</span> Review &amp; fix</li>
+          <li><span>3</span> Save, search &amp; export</li>
+        </ol>
       </header>
 
       <main>
